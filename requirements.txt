@@ -1,0 +1,6 @@
+krpc==0.5.4
+redis>=5.0
+weave>=0.51
+openai>=1.30
+python-dotenv>=1.0
+numpy>=1.26
