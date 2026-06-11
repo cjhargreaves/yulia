@@ -19,26 +19,39 @@ Kerbal Space Program (kRPC)
     -> Foundry streams        (propulsion_stream, vehicle_stream)
       -> Ontology objects      (Engine, Vehicle)
         -> Foundry Automation fires the PROP agent (AIP Logic) on telemetry change
-          -> PROP detects an engine-out -> creates a governed Command (ENGINE_OUT)
+          -> PROP detects an engine-out, creates a governed Command (ENGINE_OUT)
             -> command bus      (control/) reads PENDING commands
-              -> executor decides the response with real flight-dynamics math:
+              -> executor computes the response with flight-dynamics math:
                  shut the opposite engine (balance), then throttle up to compensate,
                  or ABORT if the vehicle can no longer reach orbit
                 -> kRPC -> vehicle responds -> telemetry reflects the result
 ```
 
 The reasoning lives in Foundry/AIP. `yulia.py` is the bridge: it streams telemetry up
-and executes the commands the agents issue. Orbital/performance math is deterministic
-Python (`core/flight_dynamics.py`) — agents decide, math is computed, not guessed.
+and executes the commands the agents issue. Orbital and performance margins are computed
+deterministically in Python (`core/flight_dynamics.py`).
+
+## Dashboard
+
+A Foundry Workshop dashboard sits on top of the ontology as the human-in-the-loop view.
+It shows the live telemetry, PROP's verdicts as they happen, and the Command log. The
+PROP automation can run in two modes:
+
+- Automatic: PROP's commands execute immediately (hands-off operation).
+- Staged for review: each command waits on the dashboard for a human to approve or reject
+  before it executes.
+
+Same pipeline, same audit trail; the dashboard is where an operator watches the agents
+work and stays in control of what reaches the vehicle.
 
 ## Layout
 
 | Path | Purpose |
 |---|---|
-| `yulia.py` | Single entry point: streams telemetry + executes commands |
+| `yulia.py` | Single entry point: streams telemetry and executes commands |
 | `core/foundry.py` | Foundry client (host, token, ontology from `.env`) |
-| `core/ksp_link.py` | The only module that talks to kRPC (vehicle I/O: shutdown, throttle, abort, opposite-engine geometry) |
-| `core/flight_dynamics.py` | Performance math: TWR, delta-v (rocket equation), orbit reachability |
+| `core/ksp_link.py` | The only module that talks to kRPC (shutdown, throttle, abort, opposite-engine geometry) |
+| `core/flight_dynamics.py` | Performance margins: TWR, delta-v (rocket equation), orbit reachability |
 | `telemetry/stream_to_foundry.py` | Builds telemetry records for the two Foundry streams |
 | `control/command_bus.py` | Reads PENDING Commands, dispatches by type to executors, marks done |
 | `control/executors/` | One executor per command type (engine_out, shutdown_engine, shutdown_opposite, throttle_up, abort) |
@@ -60,26 +73,25 @@ pip install -r requirements.txt
 In Kerbal Space Program: vessel on the pad or flying, kRPC server started (green).
 
 ```bash
-python yulia.py            # the whole loop: telemetry up + commands executed
+python yulia.py                # the whole loop: telemetry up, commands executed
 python tests/test_cascade.py   # verify the engine-out response logic (no KSP/Foundry needed)
 ```
 
 ## Foundry pieces (built in-platform)
 
 - Objects: `Engine` (from propulsion_stream), `Vehicle` (from vehicle_stream), `Command` (writable, audited)
-- Agent: `PROP` in AIP Logic — returns a structured verdict (status, callout, failing_engine_id, reasoning) and, on a genuine engine-out, issues an `ENGINE_OUT` command
+- Agent: `PROP` in AIP Logic, returns a structured verdict (status, callout, failing_engine_id, reasoning) and, on a genuine engine-out, issues an `ENGINE_OUT` command
 - Automation: fires PROP automatically when Engine telemetry changes
 - Actions: `create-command` / `edit-command` / `delete-command`
 
 ## The flight-dynamics math
 
-When PROP flags an engine-out, the executor does not "decide" with an LLM — it computes
-real performance margins from the live telemetry and acts on them. All of this lives in
-`core/flight_dynamics.py`.
+When PROP flags an engine-out, the executor computes performance margins from the live
+telemetry and acts on them. This lives in `core/flight_dynamics.py`.
 
 ### Thrust-to-weight ratio (TWR)
 
-Whether the vehicle can still climb after losing an engine. We sum the thrust of the
+Whether the vehicle can still climb after losing an engine. Sum the thrust of the
 remaining (non-failed) engines and divide by the vehicle's weight:
 
 $$
@@ -89,67 +101,62 @@ $$
 
 where $F_i$ is each engine's current thrust (N), $m$ is vehicle mass (kg), and
 $g = 9.81\ \text{m/s}^2$ (Kerbin surface gravity). If $\text{TWR} < 1$, weight exceeds
-thrust and the vehicle **cannot climb** — an immediate abort condition.
+thrust and the vehicle cannot climb, which is an immediate abort condition.
 
 ### Remaining delta-v (Tsiolkovsky rocket equation)
 
-How much velocity change the vehicle still has left in the tank — the single best measure
-of whether it can finish the climb to orbit:
+How much velocity change the vehicle still has left, the best single measure of whether it
+can finish the climb to orbit:
 
 $$
 \Delta v = I_{sp} \cdot g_0 \cdot \ln\!\left(\frac{m_{\text{wet}}}{m_{\text{dry}}}\right)
 $$
 
 where $I_{sp}$ is the engine's specific impulse (s), $g_0 = 9.80665\ \text{m/s}^2$ (the
-standard gravity used to convert $I_{sp}$ to a velocity), $m_{\text{wet}}$ is current
-total mass, and $m_{\text{dry}}$ is mass with propellant spent. The ratio
-$m_{\text{wet}} / m_{\text{dry}}$ is the mass fraction; its natural log is what the
-rocket equation turns into usable $\Delta v$.
+standard gravity used to convert $I_{sp}$ to a velocity), $m_{\text{wet}}$ is current total
+mass, and $m_{\text{dry}}$ is mass with propellant spent. The ratio
+$m_{\text{wet}} / m_{\text{dry}}$ is the mass fraction; its natural log gives the usable
+$\Delta v$.
 
 ### Orbit reachability (the go / no-go)
 
-The vehicle is judged able to reach orbit if **either** condition holds:
+The vehicle is judged able to reach orbit if either condition holds:
 
 $$
-\big(h_{ap} \geq h_{orbit} \;\wedge\; v_{\uparrow} \geq 0\big)
-\quad\lor\quad
+\left(h_{ap} \geq h_{orbit} \;\wedge\; v_{\uparrow} \geq 0\right)
+\quad \lor \quad
 \Delta v \geq \Delta v_{orbit}
 $$
 
-- $h_{ap}$ = apoapsis altitude, $h_{orbit} = 70{,}000\ \text{m}$ (Kerbin's space boundary),
-  $v_{\uparrow}$ = vertical speed. If apoapsis is already at/above the boundary and the
+- $h_{ap}$ is apoapsis altitude, $h_{orbit} = 70000\ \text{m}$ (Kerbin's space boundary),
+  $v_{\uparrow}$ is vertical speed. If apoapsis is already at or above the boundary and the
   vehicle is still rising, the trajectory is coasting to orbit.
 - Otherwise it must still hold more delta-v than a typical Kerbin ascent budget,
   $\Delta v_{orbit} \approx 3400\ \text{m/s}$.
 
 ### The decision
 
-The executor recovers the vehicle **only if it can both keep climbing and still reach
-orbit**:
+The executor recovers the vehicle only if it can both keep climbing and still reach orbit:
 
 $$
-\text{recoverable} = \big(\text{TWR}_{\text{after loss}} \geq 1\big)
+\text{recoverable} = \left(\text{TWR}_{\text{after loss}} \geq 1\right)
 \;\wedge\;
-\text{reaches\_orbit}
+\text{reachesOrbit}
 $$
 
-- **Recoverable** → shut the diametrically opposite engine (restore thrust symmetry),
-  then throttle up to compensate for the lost thrust.
-- **Not recoverable** → ABORT (cannot climb, or cannot reach orbit).
+- Recoverable: shut the diametrically opposite engine to restore thrust symmetry, then
+  throttle up to compensate for the lost thrust.
+- Not recoverable: ABORT (cannot climb, or cannot reach orbit).
 
-This is the key design point: the agent **detects and classifies**, deterministic physics
-**computes the margins**, and the response follows from the numbers — defensible, not a
-language model guessing at orbital mechanics.
+The agent detects and classifies; the physics computes the margins; the response follows
+from the numbers.
 
 ## Adding capability
 
 - New vehicle response: add an executor in `control/executors/` and register it in `command_bus.py`.
-- New agent: add it in AIP Logic and (optionally) an automation that fires it.
+- New agent: add it in AIP Logic and, optionally, an automation that fires it.
 
 ## Notes
 
 - `.env` holds a live Foundry token and is gitignored. Never commit it.
 - kRPC is isolated in `core/ksp_link.py`, so swapping Kerbal Space Program for a real vehicle is a one-file change.
-- The PROP automation can run in two modes: automatic (executes immediately) or
-  staged-for-review (a human approves each command) — the latter is the human-in-the-loop
-  path surfaced on the dashboard.
