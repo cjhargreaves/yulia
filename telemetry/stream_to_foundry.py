@@ -22,6 +22,18 @@ PROPULSION_RID = os.environ["FOUNDRY_PROPULSION_STREAM_RID"]
 VEHICLE_RID = os.environ["FOUNDRY_VEHICLE_STREAM_RID"]
 BRANCH = "master"
 
+# Fallback name when KSP hands us an unresolved localization token (e.g.
+# "#autoLOC_501232") instead of a real vessel name. Override with VEHICLE_NAME.
+DEFAULT_VEHICLE_NAME = os.environ.get("VEHICLE_NAME", "Kerbal X")
+
+
+def vehicle_name(vessel) -> str:
+    """Clean vehicle name; never let a KSP localization token through."""
+    raw = vessel.name
+    if not raw or raw.startswith("#autoLOC"):
+        return DEFAULT_VEHICLE_NAME
+    return raw
+
 
 def _propellant_fill_pct(engine) -> float:
     """Average fill % across this engine's propellants (0-100)."""
@@ -36,7 +48,7 @@ def _propellant_fill_pct(engine) -> float:
 def propulsion_records(vessel) -> list[dict]:
     """One record per engine."""
     met = round(vessel.met, 1)
-    name = vessel.name
+    name = vehicle_name(vessel)
     recs = []
     for i, e in enumerate(vessel.parts.engines):
         p = e.part
@@ -78,7 +90,7 @@ def vehicle_record(vessel) -> dict:
     # TWR = thrust / weight; weight ~ mass * surface gravity (9.81 on Kerbin SL)
     twr = round(thrust / (mass * 9.81), 2) if mass else 0.0
     return {
-        "vehicle": vessel.name,
+        "vehicle": vehicle_name(vessel),
         "time": round(vessel.met, 1),
         "situation": str(vessel.situation),
         "stage": vessel.control.current_stage,
@@ -116,7 +128,7 @@ def main():
 
     conn = krpc.connect(name="stream")
     vessel = conn.space_center.active_vessel
-    print(f"streaming {vessel.name} -> Foundry (propulsion + vehicle). Ctrl-C to stop.\n")
+    print(f"streaming {vehicle_name(vessel)} -> Foundry (propulsion + vehicle). Ctrl-C to stop.\n")
 
     while True:
         try:
