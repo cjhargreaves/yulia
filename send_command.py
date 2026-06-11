@@ -4,15 +4,15 @@ Creates a PENDING Command in Foundry; the running command bus picks it up and
 executes it in the vehicle.
 
 Examples:
-  python scripts/send_command.py SHUTDOWN_ENGINE "Kerbal X-2"
-  python scripts/send_command.py SHUTDOWN_ENGINE "Kerbal X-2" --reason "manual test"
+  python send_command.py SHUTDOWN_ENGINE "Kerbal X-2"
+  python send_command.py SHUTDOWN_ENGINE "Kerbal X-2" --reason "manual test"
 """
 import argparse
 import os
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from core.foundry import client
 

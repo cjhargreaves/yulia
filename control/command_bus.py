@@ -16,6 +16,7 @@ from control.executors.shutdown_engine import ShutdownEngineExecutor
 from control.executors.shutdown_opposite import ShutdownOppositeExecutor
 from control.executors.throttle_up import ThrottleUpExecutor
 from control.executors.abort import AbortExecutor
+from control.executors.engine_out import EngineOutExecutor
 
 ONTOLOGY = os.environ["FOUNDRY_ONTOLOGY"]
 
@@ -23,6 +24,7 @@ ONTOLOGY = os.environ["FOUNDRY_ONTOLOGY"]
 EXECUTORS = {
     e.command_type: e
     for e in [
+        EngineOutExecutor(),        # full response: balance + compensate / abort
         ShutdownEngineExecutor(),
         ShutdownOppositeExecutor(),
         ThrottleUpExecutor(),
@@ -59,7 +61,13 @@ def pending_commands() -> list[dict]:
 
 
 def mark(command: dict, status: str, detail: str) -> None:
-    """Write the command's outcome back to Foundry via edit-command."""
+    """Write the command's outcome back to Foundry via edit-command.
+
+    Stamps the real execution time (the LLM/PROP can't know wall-clock time, so
+    we set the true timestamp here when the command is actually handled).
+    """
+    from datetime import datetime, timezone
+    now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     client.ontologies.Action.apply(
         ONTOLOGY,
         "edit-command",
@@ -70,7 +78,7 @@ def mark(command: dict, status: str, detail: str) -> None:
             "commandType": command.get("commandType", ""),
             "target": command.get("target", ""),
             "issuedBy": command.get("issuedBy", ""),
-            "created": command.get("created", ""),
+            "created": now_iso,
         },
     )
 
