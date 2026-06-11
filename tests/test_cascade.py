@@ -4,8 +4,13 @@ No KSP, no Foundry. A fake vehicle records every command the executor issues, so
 we can confirm the full flight-controller response fires correctly in both the
 recoverable case (shut opposite + throttle up) and the unrecoverable case (abort).
 
-  python test_cascade.py
+  python tests/test_cascade.py
 """
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 import telemetry.stream_to_foundry as bridge
 from control.executors.engine_out import EngineOutExecutor
 
@@ -69,15 +74,16 @@ def run_scenario(name, failed_id, vehicle_state):
 
 
 if __name__ == "__main__":
-    # Recoverable: healthy mass, low altitude, plenty of fuel -> throttle up
+    # Recoverable: already coasting to orbit (apoapsis above 70km boundary) ->
+    # throttle up and press on.
     run_scenario(
         "RECOVERABLE engine-out (expect: shut opposite + throttle up)",
         "Kerbal X-2",
-        {"mass_kg": 40000, "dry_mass_kg": 12000, "apoapsis_m": 15000,
-         "vertical_speed": 120, "dynamic_pressure": 8000},
+        {"mass_kg": 40000, "dry_mass_kg": 12000, "apoapsis_m": 80000,
+         "vertical_speed": 50, "dynamic_pressure": 200},
     )
 
-    # Unrecoverable: heavy/dead, almost no propellant margin -> abort
+    # Unrecoverable: low and heavy, almost no propellant margin -> abort
     run_scenario(
         "UNRECOVERABLE engine-out (expect: abort)",
         "Kerbal X-2",
