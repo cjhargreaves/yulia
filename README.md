@@ -4,7 +4,7 @@ An aerospace operations platform built on an ontology-first philosophy and drive
 agentic AI. Real-world vehicle state is modeled as ontology objects; AI agents reason
 over those objects, diagnose problems, and issue governed commands back to the vehicle.
 
-We simulated a full rocket launch in Kerbal Space Program and tapped its live flight
+I simulated a full rocket launch in Kerbal Space Program and tapped its live flight
 data through the kRPC interface, giving us a real-time telemetry stream that accurately
 represents an actual rocket launch: thrust, propellant, engine health, attitude, and more,
 updating every tick. The agents reason over that live data exactly as they would over a
