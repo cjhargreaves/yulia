@@ -11,6 +11,22 @@ updating every tick. The agents reason over that live data exactly as they would
 real vehicle. Point the same pipeline at a real telemetry feed and nothing downstream
 changes.
 
+## Design philosophy
+
+The system separates three concerns on purpose:
+
+- **Detection and reasoning (the agent).** PROP, an AIP Logic agent modeled on a
+  propulsion flight controller, watches the engine objects and diagnoses anomalies by
+  comparing each engine against its peers.
+- **Decision math (deterministic).** Orbital and performance margins are computed in
+  code, not guessed by a language model. The agent reasons; the physics is exact.
+- **Governance (human in the loop).** The agent issues a governed Command with a
+  recommended action plan. Nothing reaches the vehicle until a human approves it on the
+  dashboard, and every decision is logged and auditable.
+
+Everything is ontology-first: real vehicle state is modeled in Foundry as objects
+(Engine, Vehicle, Command), and every layer reasons over those objects, never raw streams.
+
 ## The loop
 
 ```
@@ -20,16 +36,18 @@ Kerbal Space Program (kRPC)
       -> Ontology objects      (Engine, Vehicle)
         -> Foundry Automation fires the PROP agent (AIP Logic) on telemetry change
           -> PROP detects an engine-out, creates a governed Command (ENGINE_OUT)
-            -> command bus      (control/) reads PENDING commands
-              -> executor computes the response with flight-dynamics math:
-                 shut the opposite engine (balance), then throttle up to compensate,
-                 or ABORT if the vehicle can no longer reach orbit
-                -> kRPC -> vehicle responds -> telemetry reflects the result
+             with a recommended action plan, status PENDING
+            -> operator reviews the command + plan on the dashboard and APPROVES
+              -> command bus      (control/) executes only APPROVED commands
+                -> executor computes the response with flight-dynamics math:
+                   shut the opposite engine (balance), engage SAS to hold attitude,
+                   then throttle up to compensate, or ABORT if orbit is unreachable
+                  -> kRPC -> vehicle responds -> telemetry reflects the result
 ```
 
 The reasoning lives in Foundry/AIP. `yulia.py` is the bridge: it streams telemetry up
-and executes the commands the agents issue. Orbital and performance margins are computed
-deterministically in Python (`core/flight_dynamics.py`).
+and executes the commands a human has approved. Orbital and performance margins are
+computed deterministically in Python (`core/flight_dynamics.py`).
 
 ## Dashboard
 
@@ -57,7 +75,6 @@ work and stays in control of what reaches the vehicle.
 | `control/executors/` | One executor per command type (engine_out, shutdown_engine, shutdown_opposite, throttle_up, abort) |
 | `agents/prop_reference.py` | Reference PROP (the live PROP runs in AIP Logic) |
 | `send_command.py` | Manually issue a command (testing) |
-| `tests/test_cascade.py` | Verifies the engine-out response cascade (throttle-up vs abort) with fake telemetry |
 
 ## Setup
 
@@ -73,8 +90,7 @@ pip install -r requirements.txt
 In Kerbal Space Program: vessel on the pad or flying, kRPC server started (green).
 
 ```bash
-python yulia.py                # the whole loop: telemetry up, commands executed
-python tests/test_cascade.py   # verify the engine-out response logic (no KSP/Foundry needed)
+python yulia.py                # the whole loop: telemetry up, approved commands executed
 ```
 
 ## Foundry pieces (built in-platform)
