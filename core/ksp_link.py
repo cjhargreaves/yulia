@@ -88,6 +88,18 @@ class KSPLink:
         """Set vehicle throttle (0.0 - 1.0)."""
         self.vessel.control.throttle = max(0.0, min(1.0, value))
 
+    def set_sas(self, on: bool = True) -> None:
+        """Enable/disable SAS (stability assist) to hold attitude."""
+        self.vessel.control.sas = on
+
+    def set_rcs(self, on: bool = True) -> None:
+        """Enable/disable RCS thrusters (fine attitude control)."""
+        self.vessel.control.rcs = on
+
+    def stage(self) -> None:
+        """Activate the next stage (spacebar): decouple / jettison."""
+        self.vessel.control.activate_next_stage()
+
     def abort(self) -> None:
         """Trigger the vehicle's abort action group."""
         self.vessel.control.abort = True

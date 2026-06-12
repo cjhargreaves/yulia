@@ -37,12 +37,17 @@ class EngineOutExecutor(Executor):
         ksp.shutdown_engine(failed)
         steps.append(f"safed {failed}")
 
-        # 3. compute margins from live telemetry
+        # 3. hold attitude — losing an engine pushes the vehicle off-axis, so
+        # engage SAS to actively stabilize.
+        ksp.set_sas(True)
+        steps.append("SAS engaged to hold attitude")
+
+        # 4. compute margins from live telemetry
         engines = propulsion_records(ksp.vessel)
         veh = vehicle_record(ksp.vessel)
         m = fd.assess(engines, veh, failed)
 
-        # 4. decide: recover or abort.
+        # 5. decide: recover or abort.
         # Recoverable only if we can BOTH keep climbing AND still reach orbit.
         recoverable = m["can_climb_after_loss"] and m["reaches_orbit"]
         if recoverable:

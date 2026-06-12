@@ -21,7 +21,7 @@ from telemetry.stream_to_foundry import (
     PROPULSION_RID, VEHICLE_RID, BRANCH,
     propulsion_records, vehicle_record,
 )
-from control.command_bus import pending_commands, mark, EXECUTORS
+from control.command_bus import pending_commands, mark, dedupe_commands, EXECUTORS
 
 ONTOLOGY = os.environ["FOUNDRY_ONTOLOGY"]
 
@@ -29,10 +29,14 @@ ONTOLOGY = os.environ["FOUNDRY_ONTOLOGY"]
 def stream_telemetry(vessel):
     props = propulsion_records(vessel)
     veh = vehicle_record(vessel)
+    # Bounded timeout so one slow publish can't freeze the whole loop; a missed
+    # tick is fine, the next one carries fresh telemetry.
     client.streams.Dataset.Stream.publish_records(
-        dataset_rid=PROPULSION_RID, stream_branch_name=BRANCH, records=props)
+        dataset_rid=PROPULSION_RID, stream_branch_name=BRANCH, records=props,
+        request_timeout=8)
     client.streams.Dataset.Stream.publish_record(
-        dataset_rid=VEHICLE_RID, stream_branch_name=BRANCH, record=veh)
+        dataset_rid=VEHICLE_RID, stream_branch_name=BRANCH, record=veh,
+        request_timeout=8)
     return veh, props
 
 
@@ -61,6 +65,7 @@ def main():
     while True:
         try:
             veh, props = stream_telemetry(ksp.vessel)
+            dedupe_commands()   # collapse duplicate commands per engine
             execute_commands(ksp)
             print(f"t+{veh['time']:.0f}s  {len(props)} engines  "
                   f"alt={veh['altitude_m']:.0f}m  TWR={veh['thrust_to_weight']}")

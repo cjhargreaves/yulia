@@ -53,11 +53,51 @@ def _props(o) -> dict:
     return dict(o)
 
 
+# Human-in-the-loop: the bus executes a command ONLY after an operator approves
+# it on the dashboard (status -> APPROVED). PROP-created commands sit PENDING and
+# do nothing until accepted. (To run fully autonomous instead, add "PENDING".)
+EXECUTABLE_STATUSES = {"APPROVED"}
+
+
 def pending_commands() -> list[dict]:
     objs = client.ontologies.OntologyObject.list(ontology=ONTOLOGY, object_type="Command")
     rows = _unwrap(list(objs))
     cmds = [_props(o) for o in rows]
-    return [c for c in cmds if c.get("status") == "PENDING"]
+    return [c for c in cmds if c.get("status") in EXECUTABLE_STATUSES]
+
+
+def _all_commands() -> list[dict]:
+    objs = client.ontologies.OntologyObject.list(ontology=ONTOLOGY, object_type="Command")
+    return [_props(o) for o in _unwrap(list(objs))]
+
+
+def dedupe_commands() -> int:
+    """Collapse duplicate open commands to one per (commandType, target).
+
+    PROP can fire repeatedly while an engine stays out, spamming the feed with
+    duplicate commands. Keep the first open command for each engine+type and
+    delete the rest. Only touches still-open commands (PENDING / unreviewed) so
+    we never delete an executed or approved one. Returns how many were removed.
+    """
+    open_states = {"PENDING", None, ""}
+    seen = set()
+    removed = 0
+    for c in _all_commands():
+        if c.get("status") not in open_states:
+            continue
+        key = (c.get("commandType"), c.get("target"))
+        if key in seen:
+            cid = c.get("commandId")
+            if cid:
+                try:
+                    client.ontologies.Action.apply(
+                        ONTOLOGY, "delete-command", parameters={"Command": cid})
+                    removed += 1
+                except Exception:
+                    pass
+        else:
+            seen.add(key)
+    return removed
 
 
 def mark(command: dict, status: str, detail: str) -> None:
