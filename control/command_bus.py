@@ -72,21 +72,30 @@ def _all_commands() -> list[dict]:
 
 
 def dedupe_commands() -> int:
-    """Collapse duplicate open commands to one per (commandType, target).
+    """Keep one open command per (commandType, target); drop redundant ones.
 
-    PROP can fire repeatedly while an engine stays out, spamming the feed with
-    duplicate commands. Keep the first open command for each engine+type and
-    delete the rest. Only touches still-open commands (PENDING / unreviewed) so
-    we never delete an executed or approved one. Returns how many were removed.
+    PROP can fire repeatedly while an engine stays degraded, spamming the feed.
+    We delete an open (PENDING) command if EITHER:
+      - another open command already exists for the same engine+type, OR
+      - that engine+type has already been handled (an EXECUTED command exists).
+    We never delete EXECUTED/APPROVED/REJECTED commands. Returns count removed.
     """
     open_states = {"PENDING", None, ""}
+    cmds = _all_commands()
+
+    # engine+type pairs already handled (executed) — don't re-flag these
+    handled = {
+        (c.get("commandType"), c.get("target"))
+        for c in cmds if c.get("status") == "EXECUTED"
+    }
+
     seen = set()
     removed = 0
-    for c in _all_commands():
+    for c in cmds:
         if c.get("status") not in open_states:
             continue
         key = (c.get("commandType"), c.get("target"))
-        if key in seen:
+        if key in seen or key in handled:
             cid = c.get("commandId")
             if cid:
                 try:
